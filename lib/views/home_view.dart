@@ -30,19 +30,36 @@ class _HomeViewState extends State<HomeView> {
 
   String _selectedKeyword = _keywords.first;
 
+  /// LATIHAN 2: cache kata kunci -> Future hasilnya (hemat kuota)
+  final Map<String, Future<List<ArticleModel>>> _cache = {};
+
   /// Future disimpan di State, BUKAN dibuat di dalam build()
   late Future<List<ArticleModel>> _futureNews;
 
   @override
   void initState() {
     super.initState();
-    _futureNews = _service.searchNews(_selectedKeyword);
+    _futureNews = _ambilDariCache(_selectedKeyword);
   }
 
-  /// Future baru -> FutureBuilder otomatis memulai ulang
+  /// Pakai Future lama bila ada; bila belum ada, buat baru dan simpan.
+  Future<List<ArticleModel>> _ambilDariCache(String keyword) {
+    return _cache.putIfAbsent(keyword, () {
+      final future = _service.searchNews(keyword);
+      // Bila gagal, jangan disimpan agar bisa dicoba lagi
+      future.catchError((_) {
+        _cache.remove(keyword);
+        return <ArticleModel>[];
+      });
+      return future;
+    });
+  }
+
+  /// Dipakai tombol Coba Lagi dan pull-to-refresh: buang cache, minta baru.
   void _muatUlang() {
     setState(() {
-      _futureNews = _service.searchNews(_selectedKeyword);
+      _cache.remove(_selectedKeyword);
+      _futureNews = _ambilDariCache(_selectedKeyword);
     });
   }
 
@@ -50,8 +67,10 @@ class _HomeViewState extends State<HomeView> {
     if (keyword == _selectedKeyword) {
       return;
     }
-    _selectedKeyword = keyword;
-    _muatUlang();
+    setState(() {
+      _selectedKeyword = keyword;
+      _futureNews = _ambilDariCache(keyword);
+    });
   }
 
   /// Untuk RefreshIndicator: tunggu sampai request selesai
@@ -64,6 +83,41 @@ class _HomeViewState extends State<HomeView> {
     }
   }
 
+  /// LATIHAN 1: dialog input kata kunci, lalu buka halaman hasil
+  Future<void> _bukaDialogCari() async {
+    final controller = TextEditingController();
+
+    final keyword = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cari berita kuliner'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Contoh: sate padang'),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('Cari'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    final teks = keyword?.trim() ?? '';
+    if (teks.isEmpty) {
+      return;
+    }
+    Get.toNamed(AppRoutes.search, arguments: teks);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -71,6 +125,13 @@ class _HomeViewState extends State<HomeView> {
         title: const Text('Berita Perut Lapar 🍜'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.search),
+            tooltip: 'Cari berita',
+            onPressed: _bukaDialogCari,
+          ),
+        ],
       ),
       body: Column(
         children: [
